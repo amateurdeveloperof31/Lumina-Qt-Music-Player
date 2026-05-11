@@ -33,6 +33,9 @@ class MusicPlayerUI(QWidget):
         self.setFixedSize(self.width, self.height)
         self.setWindowIcon(QIcon("assets/images/window_icon.png"))
 
+        self.progress_timer = QTimer()
+        self.progress_timer.timeout.connect(self.update_progressbar)
+
         # Variables
         self.main_background = "#272a24"
         self.alternate_background = "#1B3645"
@@ -340,6 +343,9 @@ class MusicPlayerUI(QWidget):
             }
         """)
 
+        self.song_progress_bar.sliderPressed.connect(self.progress_timer.stop)
+        self.song_progress_bar.sliderReleased.connect(self.manual_slider_positioning)
+
         progress_layout.addWidget(self.song_current_duration)
         progress_layout.addWidget(self.song_progress_bar)
         progress_layout.addWidget(self.song_total_duration)
@@ -433,7 +439,6 @@ class MusicPlayerUI(QWidget):
 # -------------------------------------------------- Play Song ---------------------------------------------------------
     def play_song(self):
         if self.play_state == 0:
-            self.update_progressbar()
             self.play_state = 1
         elif self.play_state == 1:
             self.play_state = 2
@@ -443,17 +448,18 @@ class MusicPlayerUI(QWidget):
                 mixer.music.set_pos(self.song_time)
             else:
                 mixer.music.play()
+            self.progress_timer.start(1000)
             self.play_button.setText('⏸')
-            self.update_progressbar()
         elif self.play_state == 2:
             self.play_state = 3
             self.play_button.setText("▶")
+            self.progress_timer.stop()
             mixer.music.pause()
         else:
             self.play_state = 2
             self.play_button.setText('⏸')
             mixer.music.unpause()
-            self.update_progressbar()
+            self.progress_timer.start(1000)
 # -------------------------------------------------- Next Song ---------------------------------------------------------
     def next_song(self):
         self.song_time = None
@@ -461,7 +467,7 @@ class MusicPlayerUI(QWidget):
             self.previous_song_idx = self.current_song_idx
             self.current_song_idx += 1
             self.current_song_location = self.playlist[self.current_song_idx]['song_location']
-            self.load_song()
+            self.load_song(True)
 # ------------------------------------------------ Previous Song -------------------------------------------------------
     def previous_song(self):
         self.song_time = None
@@ -469,14 +475,14 @@ class MusicPlayerUI(QWidget):
             self.previous_song_idx = self.current_song_idx
             self.current_song_idx -= 1
             self.current_song_location = self.playlist[self.current_song_idx]['song_location']
-            self.load_song()
+            self.load_song(True)
 # -------------------------------------------- Select from Playlist-----------------------------------------------------
     def on_double_click(self, label_number):
         self.previous_song_idx = self.current_song_idx
         self.current_song_idx = label_number
         self.current_song_location = self.playlist[self.current_song_idx]['song_location']
         self.song_time = None
-        self.load_song()
+        self.load_song(True)
 # --------------------------------------------- Select Song Folder -----------------------------------------------------
     def select_song_folder(self):
         self.folder_path = QFileDialog.getExistingDirectory()
@@ -497,9 +503,9 @@ class MusicPlayerUI(QWidget):
             with open('misc/mmp_settings.json', 'w') as settings_file:
                 settings_file.write(json.dumps(settings))
 
-            self.load_settings_file()
+            self.load_settings_file(True)
 # ------------------------------------------------ Load Settings -------------------------------------------------------
-    def load_settings_file(self):
+    def load_settings_file(self, autoplay=False):
         try:
             with open("misc/mmp_settings.json", "r") as settings_file:
                 settings_data = settings_file.read()
@@ -525,9 +531,9 @@ class MusicPlayerUI(QWidget):
                 self.current_song_location = None
                 self.song_time = None
 
-            self.load_playlist()
+            self.load_playlist(autoplay)
 # ------------------------------------------------ Load Playlist -------------------------------------------------------
-    def load_playlist(self):
+    def load_playlist(self, autoplay=False):
         supported = {"MP3": MP3, "FLAC": FLAC, "WAV": WAVE}
 
         if not self.folder_path or not os.path.isdir(self.folder_path):
@@ -573,7 +579,7 @@ class MusicPlayerUI(QWidget):
             if not song_title or song_title == 'None':
                 song_title = song_file.stem
 
-            album_art_image, image_location = self.get_song_thumbnail(tags, song_title, song_artist)
+            album_art_image, image_location = self.get_song_thumbnail(tags, song_title, song_artist, ext)
 
             temp_playlist.append(
                 {
@@ -612,15 +618,16 @@ class MusicPlayerUI(QWidget):
             self.current_song_idx = next((k for k, v in self.playlist.items()
                           if Path(v['song_location']).resolve() == Path(self.current_song_location).resolve()), None)
 
-        self.load_song()
+        self.load_song(autoplay)
 # -------------------------------------------------- Load Song ---------------------------------------------------------
-    def load_song(self):
-        # if self.status:
-        #     self.windows.after_cancel(self.status)
+    def load_song(self, autoplay=False):
+        current_time = int(self.song_time) if self.song_time else 0
+        self.song_progress_bar.setValue(current_time)
+        self.progress_timer.stop()
         self.current_song_length = self.playlist[self.current_song_idx]['song_length']
         song_mins = int(self.current_song_length / 60)
         song_secs = int(self.current_song_length % 60)
-        minutes = seconds = 0
+        minutes, seconds = divmod(current_time,60)
         self.song_progress_bar.setMaximum(self.current_song_length)
         self.song_current_duration.setText("{:02d}:{:02d}".format(minutes, seconds))
         self.song_total_duration.setText("{:02d}:{:02d}".format(song_mins, song_secs))
@@ -632,17 +639,20 @@ class MusicPlayerUI(QWidget):
         self.scroll_area.ensureWidgetVisible(self.playlist_items[self.current_song_idx - 1], 0,
                                                                 self.playlist_items[self.current_song_idx - 1].height())
 
-        if self.play_state != 0:
-            self.play_state = 1
-
         self.song_title = self.playlist[self.current_song_idx]['song_title']
         self.song_artist = self.playlist[self.current_song_idx]['song_artist']
         self.song_album_art = self.playlist[self.current_song_idx]['song_art']
 
         self.update_music_info()
-        self.play_song()
+        if not self.song_time:
+            self.song_time = 0
+        self.play_state = 1
+        if autoplay:
+            self.play_song()
+        else:
+            self.play_button.setText("▶")
 # ----------------------------------------------- Song Thumbnails ------------------------------------------------------
-    def get_song_thumbnail(self, tags, song_title, song_artist):
+    def get_song_thumbnail(self, tags, song_title, song_artist, song_ext):
         sasa_joined = f"{song_title} {song_artist}"
         image_file_name = ''.join(letter for letter in sasa_joined if letter.isalnum())
         image_location = f"images/album_art/{image_file_name}.png"
@@ -655,68 +665,42 @@ class MusicPlayerUI(QWidget):
 
             return scaled, image_location
 
+        pict = None
+
         try:
-            pict = tags.get("APIC:").data
-        except AttributeError as e:
-            print(f'Song Tag Error:{e}\n Default Album Art!!')
-            image_location = "images/default_album_art.png"
-            pixmap = QPixmap(image_location)
-            scaled = pixmap.scaled(450, 450, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            if song_ext == "MP3":
+                apic = tags.get("APIC:")
+                if apic:
+                    pict = apic.data
+            elif song_ext == "FLAC":
+                if tags.pictures:
+                    pict = tags.pictures[0].data
 
-            return scaled, image_location
-
-        # Save
-        try:
-            with open(image_location, "wb") as image_file:
-                image_file.write(pict)
-
+            if pict:
+                with open(image_location, "wb") as image_file:
+                    image_file.write(pict)
         except Exception as e:
-            print(f"Album Art Save Error: {e}")
-            image_location = "images/default_album_art.png"
+            print(f"Embedded Art Error: {e}")
+
+        if not os.path.exists(image_location):
+            try:
+                api = MusicBrainzAPI()
+                response = api.search_releases(f'release:{song_title} 'f'AND artist:{song_artist}')
+                album_art_url = (response["images"][0]["thumbnails"]["small"])
+
+                img_data = requests.get(album_art_url, timeout=10).content
+
+                with open(image_location, "wb") as handler:
+                    handler.write(img_data)
+
+            except Exception as e:
+                print(f"Online Album Art Error: {e}")
+                image_location = ("images/default_album_art.png")
 
         pixmap = QPixmap(image_location)
         scaled = pixmap.scaled(450, 450, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
 
         return scaled, image_location
-# ---------------------------------------------- Download Album Art-----------------------------------------------------
-    def download_album_art(self):
-        song_namer = self.song_namer
-        self.song_artiste = self.song_artiste
-
-        try:
-            api = MusicBrainzAPI()
-            response = api.search_releases(f'release:{song_namer} AND artist:{self.song_artiste}')
-            album_art_url = response["images"][0]["thumbnails"]["small"]
-
-        except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError,
-                requests.exceptions.MissingSchema, TypeError, KeyError):
-            image_location = "images/default_album_art.png"
-            self.album_art_image = PhotoImage(file=image_location)
-        else:
-            sasa_joined = f"{song_namer} {self.song_artiste}"
-            image_file_name = ''.join(letter for letter in sasa_joined if letter.isalnum())
-            image_location = f"images/album_art/{image_file_name}.png"
-            try:
-                img_data = requests.get(album_art_url).content
-            except requests.exceptions.MissingSchema as e:
-                print(e)
-                image_location = "images/default_album_art.png"
-                self.album_art_image = PhotoImage(file=image_location)
-            else:
-                with open(image_location, 'wb') as handler:
-                    handler.write(img_data)
-                imgee = Image.open(image_location)
-                self.album_art_image = ImageTk.PhotoImage(imgee)
-                try:
-                    image_location = f"{image_location}"
-                    pil_image = Image.open(image_location)
-                    self.album_art_image = ImageTk.PhotoImage(pil_image)
-                except (TclError, FileNotFoundError, AttributeError) as e:
-                    print(f'Song Tag Error:{e}\n Default Album Art!!')
-                    image_location = "images/default_album_art.png"
-                    self.album_art_image = PhotoImage(file=image_location)
-
-        self.update_music_info()
 # ------------------------------------------------- Set Album Art ------------------------------------------------------
     def set_album_art(self, image_path):
         pixmap = QPixmap(image_path)
@@ -741,6 +725,9 @@ class MusicPlayerUI(QWidget):
         self.set_album_art(self.song_album_art)
 # ------------------------------------------------ Progress Bar --------------------------------------------------------
     def update_progressbar(self):
+        if self.play_state != 2:
+            return
+
         if self.song_time:
             current_time = round((mixer.music.get_pos() / 1000) + self.song_time)
         else:
@@ -748,37 +735,38 @@ class MusicPlayerUI(QWidget):
         self.song_progress_bar.setValue(int(current_time))
         minutes, seconds = divmod(round(current_time), 60)
         self.song_current_duration.setText("{:02d}:{:02d}".format(minutes, seconds))
-        if self.play_state == 2:
-            if current_time < int(self.current_song_length) - 1:
-                self.status = QTimer.singleShot(1000, self.update_progressbar)
+
+        if current_time >= int(self.current_song_length) - 1:
+            self.progress_timer.stop()
+            if self.current_song_idx < len(self.playlist):
+                self.next_song()
             else:
-                if self.current_song_idx < len(self.play_queue):
-                    self.next_song()
-                else:
-                    self.song_time = 0
-                    self.current_song_idx = 1
-                    self.previous_song_idx = None
-                    self.current_song_location = 0
-                    self.play_state = 0
-                    mixer.music.stop()
-                    self.song_progress_bar.setValue(0)
-                    self.song_current_duration.setText("00:00")
-                    self.load_playlist()
+                self.song_time = 0
+                self.current_song_idx = 1
+                self.previous_song_idx = None
+                self.current_song_location = None
+                self.play_state = 0
+                mixer.music.stop()
+                self.song_progress_bar.setValue(0)
+                self.song_current_duration.setText("00:00")
+                self.load_playlist()
 # -------------------------------------------- Manual Progress Bar -----------------------------------------------------
-    def manual_slider_positioning(self, event):
-        # time.sleep(1)
-        mixer.music.pause()
+    def manual_slider_positioning(self):
         current_time = int(self.song_progress_bar.value())
         self.song_time = current_time
+        mixer.music.stop()
+        mixer.music.play(start=current_time)
         minutes, seconds = divmod(int(current_time), 60)
         self.song_current_duration.setText("{:02d}:{:02d}".format(minutes, seconds))
-        if ceil(current_time) == ceil(self.current_song_length) - 1:
+        self.play_state = 2
+        self.play_button.setText("⏸")
+        self.progress_timer.start(1000)
+        if current_time == int(self.current_song_length) - 1:
             self.next_song()
-        self.play_state = 1
-        self.play_song()
 # -------------------------------------------------- On Close ----------------------------------------------------------
     def closeEvent(self, event):
         current_song_time = (mixer.music.get_pos() / 1000)
+        self.progress_timer.stop()
         if self.song_time:
             current_song_time += self.song_time
         if current_song_time < 0:

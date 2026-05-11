@@ -2,7 +2,7 @@
 from PySide6.QtWidgets import (QApplication, QWidget, QFrame, QVBoxLayout, QGraphicsDropShadowEffect,
                                QHBoxLayout,QLabel, QPushButton, QSlider, QFileDialog, QScrollArea, QMessageBox)
 from PySide6.QtGui import QIcon, QColor, QFont, QPixmap, QPainter, QPainterPath
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 import sys
 from mutagen.id3 import ID3
 from mutagen.mp3 import MP3, HeaderNotFoundError
@@ -139,13 +139,13 @@ class MusicPlayerUI(QWidget):
         playlist_layout.addSpacing(10)
 
         # Scroll Area
-        scroll_area = QScrollArea()
+        self.scroll_area = QScrollArea()
 
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll_area.setFrameShape(QFrame.NoFrame)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_area.setFrameShape(QFrame.NoFrame)
 
-        scroll_area.setStyleSheet("""
+        self.scroll_area.setStyleSheet("""
             QScrollArea {
                 background: transparent;
                 border: none;
@@ -197,8 +197,8 @@ class MusicPlayerUI(QWidget):
         self.songs_layout.setSpacing(12)
 
         self.songs_layout.addStretch()
-        scroll_area.setWidget(scroll_container)
-        playlist_layout.addWidget(scroll_area)
+        self.scroll_area.setWidget(scroll_container)
+        playlist_layout.addWidget(self.scroll_area)
 
         self.footer = QLabel("P L A Y L I S T")
         self.footer.setStyleSheet("""
@@ -247,7 +247,7 @@ class MusicPlayerUI(QWidget):
 
         # Album Art
         self.bg_image = QLabel(self.media_frame)
-        self.set_album_art("assets/images/concept.png")
+        self.set_album_art("assets/images/default.png")
         self.bg_image.setGeometry(0, 0, self.media_frame.width(), self.media_frame.height())
 
         Qt.KeepAspectRatioByExpanding
@@ -596,9 +596,10 @@ class MusicPlayerUI(QWidget):
         for idx, song_data in self.playlist.items():
             mins, secs = int(song_data['song_length'] / 60), int(song_data['song_length'] % 60)
             song_l = ("{:02d}:{:02d}".format(mins, secs))
-            item = PlaylistItem(song_data['song_art'], song_data['song_title'], song_l)
+            item = PlaylistItem(song_data['song_art'], song_data['song_title'], song_l, idx)
+            item.double_clicked.connect(self.on_double_click)
             self.playlist_items.append(item)
-            self.songs_layout.addWidget(item, alignment=Qt.AlignHCenter)
+            self.songs_layout.addWidget(item, alignment=Qt.AlignLeft)
 
         # Update Folder Name
         self.folder_path_label = os.path.basename(self.folder_path)
@@ -628,6 +629,8 @@ class MusicPlayerUI(QWidget):
         if self.previous_song_idx:
             self.playlist_items[self.previous_song_idx - 1].set_active(False)
         self.playlist_items[self.current_song_idx - 1].set_active(True)
+        self.scroll_area.ensureWidgetVisible(self.playlist_items[self.current_song_idx - 1], 0,
+                                                                self.playlist_items[self.current_song_idx - 1].height())
 
         if self.play_state != 0:
             self.play_state = 1
@@ -819,15 +822,16 @@ class MusicPlayerUI(QWidget):
             del item
 # ------------------------------------------------- Playlist Frame -----------------------------------------------------
 class PlaylistItem(QFrame):
-    def __init__(self, image, title, duration, active=False):
+    double_clicked = Signal(int)
+    def __init__(self, image, title, duration, index, active=False):
         super().__init__()
 
         self.active = active
         self.title = title
         self.duration = duration
+        self.index = index
 
-        self.setMinimumWidth(0)
-        self.setFixedHeight(70)
+        self.setFixedSize(180, 70)
 
         layout = QHBoxLayout(self)
 
@@ -891,6 +895,7 @@ class PlaylistItem(QFrame):
 
         layout.addWidget(cover)
         layout.addLayout(text_layout)
+        layout.addStretch()
 
         self.update_style()
 # ------------------------------------------- Update Active Style ------------------------------------------------------
@@ -913,6 +918,10 @@ class PlaylistItem(QFrame):
     def set_active(self, state):
         self.active = state
         self.update_style()
+# ----------------------------------------------- Double Click ---------------------------------------------------------
+    def mouseDoubleClickEvent(self, event):
+        self.double_clicked.emit(self.index)
+        super().mouseDoubleClickEvent(event)
 # --------------------------------------------------- Debug ------------------------------------------------------------
 if __name__ == "__main__":
     app = QApplication(sys.argv)

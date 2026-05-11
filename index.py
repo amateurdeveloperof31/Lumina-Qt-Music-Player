@@ -2,7 +2,8 @@
 from PySide6.QtWidgets import (QApplication, QWidget, QFrame, QVBoxLayout, QGraphicsDropShadowEffect,
                                QHBoxLayout,QLabel, QPushButton, QSlider, QFileDialog, QScrollArea, QMessageBox)
 from PySide6.QtGui import QIcon, QColor, QFont, QPixmap, QPainter, QPainterPath
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal, QObject, QThread
+import threading
 import sys
 from mutagen.id3 import ID3
 from mutagen.mp3 import MP3, HeaderNotFoundError
@@ -12,12 +13,8 @@ from mutagen.wave import WAVE
 from mutagen import MutagenError
 import json
 import os
-from os.path import exists
-from math import ceil
 from apps.utils.musicbrainz_api import MusicBrainzAPI
 import requests
-import time
-from datetime import datetime
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 import pygame.mixer as mixer
 from pathlib import Path
@@ -37,12 +34,6 @@ class MusicPlayerUI(QWidget):
         self.progress_timer.timeout.connect(self.update_progressbar)
 
         # Variables
-        self.main_background = "#272a24"
-        self.alternate_background = "#1B3645"
-        self.slider_color = "#858585"
-        self.playlist_frame_color = "#34A8FF"
-        self.current_song_color = "#fff523"
-        self.main_text = "#FFFFFF"
         self.folder_path_label = "Select a Folder First!!"
         self.song_title = ""
         self.song_artist = ""
@@ -52,22 +43,15 @@ class MusicPlayerUI(QWidget):
         self.current_song_length = 0
         self.folder_path = None
         self.current_song_location = None
-        self.current_song_name = None
-        self.current_song_artist = None
         self.song_time = None
-        self.play_queue = []
-        self.play_queue_extensions = []
         self.total_songs = 0
-        self.status = None
         self.playlist = {}
         self.playlist_items = []
 
         # Play State: {0: Starting - Paused, 1: Loaded - Paused, 2: Play, 3: Paused}
         self.play_state = 0
 
-        self.setStyleSheet("""
-                            background-color: #121212;
-                            """)
+        self.setStyleSheet(""" background-color: #121212; """)
 
         mixer.init()
         
@@ -195,6 +179,7 @@ class MusicPlayerUI(QWidget):
         """)
 
         self.songs_layout = QVBoxLayout(scroll_container)
+        self.songs_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
 
         self.songs_layout.setContentsMargins(0, 0, 12, 0)
         self.songs_layout.setSpacing(12)
@@ -622,13 +607,13 @@ class MusicPlayerUI(QWidget):
 # -------------------------------------------------- Load Song ---------------------------------------------------------
     def load_song(self, autoplay=False):
         current_time = int(self.song_time) if self.song_time else 0
-        self.song_progress_bar.setValue(current_time)
         self.progress_timer.stop()
         self.current_song_length = self.playlist[self.current_song_idx]['song_length']
         song_mins = int(self.current_song_length / 60)
         song_secs = int(self.current_song_length % 60)
         minutes, seconds = divmod(current_time,60)
         self.song_progress_bar.setMaximum(self.current_song_length)
+        self.song_progress_bar.setValue(current_time)
         self.song_current_duration.setText("{:02d}:{:02d}".format(minutes, seconds))
         self.song_total_duration.setText("{:02d}:{:02d}".format(song_mins, song_secs))
         mixer.music.load(self.playlist[self.current_song_idx]['song_location'])
@@ -683,24 +668,38 @@ class MusicPlayerUI(QWidget):
             print(f"Embedded Art Error: {e}")
 
         if not os.path.exists(image_location):
-            try:
-                api = MusicBrainzAPI()
-                response = api.search_releases(f'release:{song_title} 'f'AND artist:{song_artist}')
-                album_art_url = (response["images"][0]["thumbnails"]["small"])
+            threading.Thread(
+                target=self.download_album_art_thread,
+                args=(song_title,song_artist,image_location), daemon=True).start()
 
-                img_data = requests.get(album_art_url, timeout=10).content
-
-                with open(image_location, "wb") as handler:
-                    handler.write(img_data)
-
-            except Exception as e:
-                print(f"Online Album Art Error: {e}")
-                image_location = ("images/default_album_art.png")
+            image_location = ("assets/images/default.png")
 
         pixmap = QPixmap(image_location)
         scaled = pixmap.scaled(450, 450, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
 
         return scaled, image_location
+# ------------------------------------------- Download Song Thumbnails -------------------------------------------------
+    def download_album_art_thread(self, song_title, song_artist, image_location):
+        try:
+            api = MusicBrainzAPI()
+            response = api.search_releases(f'release:{song_title} 'f'AND artist:{song_artist}')
+            if not response:
+                return
+            images = response.get("images")
+            if not images:
+                return
+            album_art_url = (images[0].get("image"))
+            if not album_art_url:
+                return
+            img_data = requests.get(album_art_url, timeout=3).content
+            with open(image_location, "wb") as handler:
+                handler.write(img_data)
+
+        except Exception as e:
+
+            print(
+                f"Online Album Art Error: {e}"
+            )
 # ------------------------------------------------- Set Album Art ------------------------------------------------------
     def set_album_art(self, image_path):
         pixmap = QPixmap(image_path)
@@ -728,10 +727,8 @@ class MusicPlayerUI(QWidget):
         if self.play_state != 2:
             return
 
-        if self.song_time:
-            current_time = round((mixer.music.get_pos() / 1000) + self.song_time)
-        else:
-            current_time = round(mixer.music.get_pos() / 1000)
+        temp_time = mixer.music.get_pos() / 1000
+        current_time = round(temp_time + self.song_time) if self.song_time else round(temp_time)
         self.song_progress_bar.setValue(int(current_time))
         minutes, seconds = divmod(round(current_time), 60)
         self.song_current_duration.setText("{:02d}:{:02d}".format(minutes, seconds))
@@ -910,6 +907,38 @@ class PlaylistItem(QFrame):
     def mouseDoubleClickEvent(self, event):
         self.double_clicked.emit(self.index)
         super().mouseDoubleClickEvent(event)
+# -------------------------------------------- Album Art Download ------------------------------------------------------
+class AlbumArtWorker(QObject):
+    finished = Signal(str)
+    def __init__(self, song_title, song_artist, image_location):
+        super().__init__()
+
+        self.song_title = song_title
+        self.song_artist = song_artist
+        self.image_location = image_location
+
+    def run(self):
+        try:
+            api = MusicBrainzAPI()
+
+            response = api.search_releases(f'release:{self.song_title} 'f'AND artist:{self.song_artist}')
+
+            if not response:
+                raise Exception("No response")
+
+            album_art_url = (response["images"][0]["thumbnails"]["small"])
+
+            img_data = requests.get(album_art_url,timeout=3).content
+
+            with open(self.image_location, "wb") as handler:
+                handler.write(img_data)
+
+            self.finished.emit(self.image_location)
+
+        except Exception as e:
+            print(f"Online Album Art Error: {e}")
+
+            self.finished.emit("assets/images/default.png")
 # --------------------------------------------------- Debug ------------------------------------------------------------
 if __name__ == "__main__":
     app = QApplication(sys.argv)

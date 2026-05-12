@@ -2,7 +2,8 @@
 from PySide6.QtWidgets import (QApplication, QWidget, QFrame, QVBoxLayout, QGraphicsDropShadowEffect,
                                QHBoxLayout,QLabel, QPushButton, QSlider, QFileDialog, QScrollArea, QMessageBox)
 from PySide6.QtGui import QIcon, QColor, QFont, QPixmap, QPainter, QPainterPath
-from PySide6.QtCore import Qt, QTimer, Signal, QObject, QThread
+from PySide6.QtCore import Qt, QTimer, Signal, QObject, QThread, QSize
+from PySide6.QtSvgWidgets import QSvgWidget
 import threading
 import sys
 from mutagen.id3 import ID3
@@ -47,10 +48,12 @@ class MusicPlayerUI(QWidget):
         self.playlist = {}
         self.playlist_items = []
 
+        window_background = '#121212'
+
         # Play State: {0: Starting - Paused, 1: Loaded - Paused, 2: Play, 3: Paused}
         self.play_state = 0
 
-        self.setStyleSheet(""" background-color: #121212; """)
+        self.setStyleSheet(""" background-color: """ f'{window_background}' """; """)
 
         mixer.init()
         
@@ -343,17 +346,15 @@ class MusicPlayerUI(QWidget):
         controls_layout.setSpacing(20)
 
         # Previous Button
-        self.previous_button = QPushButton("⏮")
+        self.previous_button = QPushButton()
         self.previous_button.setFixedSize(55, 55)
+        self.previous_button.setIcon(QIcon("assets/images/left.svg"))
+        self.previous_button.setIconSize(QSize(28, 28))
         self.previous_button.setStyleSheet("""
             QPushButton {
                 background-color: rgba(255,255,255,8);
-
                 border-radius: 27px;
                 border: none;
-
-                color: white;
-                font-size: 22px;
             }
 
             QPushButton:hover {
@@ -366,15 +367,15 @@ class MusicPlayerUI(QWidget):
         controls_layout.addWidget(self.previous_button)
 
         # Play Button
-        self.play_button = QPushButton("▶")
+        self.play_button = QPushButton()
         self.play_button.setFixedSize(75, 75)
+        self.play_button.setIcon(QIcon("assets/images/play.svg"))
+        self.play_button.setIconSize(QSize(36, 36))
         self.play_button.setStyleSheet("""
             QPushButton {
                 background-color: rgba(255,255,255,18);
                 border-radius: 37px;
                 border: none;
-                color: white;
-                font-size: 28px;
             }
 
             QPushButton:hover {
@@ -387,17 +388,15 @@ class MusicPlayerUI(QWidget):
         controls_layout.addWidget(self.play_button)
 
         # Next Button
-        self.next_button = QPushButton("⏭")
+        self.next_button = QPushButton()
         self.next_button.setFixedSize(55, 55)
+        self.next_button.setIcon(QIcon("assets/images/right.svg"))
+        self.next_button.setIconSize(QSize(28, 28))
         self.next_button.setStyleSheet("""
             QPushButton {
                 background-color: rgba(255,255,255,8);
-
                 border-radius: 27px;
                 border: none;
-
-                color: white;
-                font-size: 22px;
             }
 
             QPushButton:hover {
@@ -433,15 +432,15 @@ class MusicPlayerUI(QWidget):
             else:
                 mixer.music.play()
             self.progress_timer.start(1000)
-            self.play_button.setText('⏸')
+            self.play_button.setIcon(QIcon("assets/images/pause.svg"))
         elif self.play_state == 2:
             self.play_state = 3
-            self.play_button.setText("▶")
+            self.play_button.setIcon(QIcon("assets/images/play.svg"))
             self.progress_timer.stop()
             mixer.music.pause()
         else:
             self.play_state = 2
-            self.play_button.setText('⏸')
+            self.play_button.setIcon(QIcon("assets/images/pause.svg"))
             mixer.music.unpause()
             self.progress_timer.start(1000)
 # -------------------------------------------------- Next Song ---------------------------------------------------------
@@ -634,7 +633,7 @@ class MusicPlayerUI(QWidget):
         if autoplay:
             self.play_song()
         else:
-            self.play_button.setText("▶")
+            self.play_button.setIcon(QIcon("assets/images/play.svg"))
 # ----------------------------------------------- Song Thumbnails ------------------------------------------------------
     def get_song_thumbnail(self, tags, song_title, song_artist, song_ext):
         sasa_joined = f"{song_title} {song_artist}"
@@ -755,7 +754,7 @@ class MusicPlayerUI(QWidget):
         minutes, seconds = divmod(int(current_time), 60)
         self.song_current_duration.setText("{:02d}:{:02d}".format(minutes, seconds))
         self.play_state = 2
-        self.play_button.setText("⏸")
+        self.play_button.setIcon(QIcon("assets/images/pause.svg"))
         self.progress_timer.start(1000)
         if current_time == int(self.current_song_length) - 1:
             self.next_song()

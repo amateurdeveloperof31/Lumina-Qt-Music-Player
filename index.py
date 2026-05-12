@@ -18,7 +18,6 @@ import requests
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 import pygame.mixer as mixer
 from pathlib import Path
-
 # ---------------------------------------------------- Main ------------------------------------------------------------
 class MusicPlayerUI(QWidget):
     def __init__(self):
@@ -762,24 +761,35 @@ class MusicPlayerUI(QWidget):
             self.next_song()
 # -------------------------------------------------- On Close ----------------------------------------------------------
     def closeEvent(self, event):
-        current_song_time = (mixer.music.get_pos() / 1000)
-        self.progress_timer.stop()
-        if self.song_time:
-            current_song_time += self.song_time
-        if current_song_time < 0:
-            current_song_time = 0
-        current_position = {
-            'current_song_location': self.current_song_location,
-            'current_song_time': current_song_time
-        }
+        try:
+            current_song_time = (mixer.music.get_pos() / 1000)
+            self.progress_timer.stop()
+            if self.song_time:
+                current_song_time += self.song_time
+            if current_song_time < 0:
+                current_song_time = 0
+            current_position = {
+                'current_song_location': self.current_song_location,
+                'current_song_time': current_song_time
+            }
 
-        settings_path = Path("misc/mmp_settings.json")
-        with settings_path.open("r+", encoding="utf-8") as f:
-            settings_data = json.load(f)
-            settings_data.update(current_position)
-            f.seek(0)
-            json.dump(settings_data, f, indent=4)
-            f.truncate()
+            settings_path = Path("misc/mmp_settings.json")
+            with settings_path.open("r+", encoding="utf-8") as f:
+                settings_data = json.load(f)
+                settings_data.update(current_position)
+                f.seek(0)
+                json.dump(settings_data, f, indent=4)
+                f.truncate()
+
+        except Exception as e:
+            print(e)
+            settings = {
+                "folder_path": None,
+                "current_song_location": None,
+                "current_song_time": None
+            }
+            with open('misc/mmp_settings.json', 'w') as settings_file:
+                settings_file.write(json.dumps(settings, indent=4))
 
         mixer.music.stop()
         event.accept()
@@ -907,38 +917,6 @@ class PlaylistItem(QFrame):
     def mouseDoubleClickEvent(self, event):
         self.double_clicked.emit(self.index)
         super().mouseDoubleClickEvent(event)
-# -------------------------------------------- Album Art Download ------------------------------------------------------
-class AlbumArtWorker(QObject):
-    finished = Signal(str)
-    def __init__(self, song_title, song_artist, image_location):
-        super().__init__()
-
-        self.song_title = song_title
-        self.song_artist = song_artist
-        self.image_location = image_location
-
-    def run(self):
-        try:
-            api = MusicBrainzAPI()
-
-            response = api.search_releases(f'release:{self.song_title} 'f'AND artist:{self.song_artist}')
-
-            if not response:
-                raise Exception("No response")
-
-            album_art_url = (response["images"][0]["thumbnails"]["small"])
-
-            img_data = requests.get(album_art_url,timeout=3).content
-
-            with open(self.image_location, "wb") as handler:
-                handler.write(img_data)
-
-            self.finished.emit(self.image_location)
-
-        except Exception as e:
-            print(f"Online Album Art Error: {e}")
-
-            self.finished.emit("assets/images/default.png")
 # --------------------------------------------------- Debug ------------------------------------------------------------
 if __name__ == "__main__":
     app = QApplication(sys.argv)

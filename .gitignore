@@ -1,6 +1,8 @@
 test.py
 .idea/
-images/
+/images/
 misc/
 .venev/
 todo.txt
+apps/utils/__pycache__/
+assets/images/concept.png

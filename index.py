@@ -562,7 +562,7 @@ class MusicPlayerUI(QWidget):
             if not song_title or song_title == 'None':
                 song_title = song_file.stem
 
-            album_art_image, image_location = self.get_song_thumbnail(tags, song_title, song_artist, ext)
+            album_art_image, image_location = self.get_song_thumbnail(tags, song_title, song_artist, song_album, ext)
 
             temp_playlist.append(
                 {
@@ -595,7 +595,7 @@ class MusicPlayerUI(QWidget):
         shortened_folder_name = self.word_shorten(self.folder_path_label, 40)
         self.footer.setText(shortened_folder_name.upper())
 
-        if not self.current_song_location or not self.current_song_location.strip():
+        if not self.current_song_location or not self.current_song_location.strip() or not Path(self.current_song_location).exists():
             self.current_song_location = self.playlist[self.current_song_idx]['song_location']
         else:
             self.current_song_idx = next((k for k, v in self.playlist.items()
@@ -635,7 +635,7 @@ class MusicPlayerUI(QWidget):
         else:
             self.play_button.setIcon(QIcon("assets/images/play.svg"))
 # ----------------------------------------------- Song Thumbnails ------------------------------------------------------
-    def get_song_thumbnail(self, tags, song_title, song_artist, song_ext):
+    def get_song_thumbnail(self, tags, song_title, song_artist, song_album, song_ext):
         sasa_joined = f"{song_title} {song_artist}"
         image_file_name = ''.join(letter for letter in sasa_joined if letter.isalnum())
         image_location = f"images/album_art/{image_file_name}.png"
@@ -668,7 +668,7 @@ class MusicPlayerUI(QWidget):
         if not os.path.exists(image_location):
             threading.Thread(
                 target=self.download_album_art_thread,
-                args=(song_title,song_artist,image_location), daemon=True).start()
+                args=(song_title,song_artist,song_album,image_location), daemon=True).start()
 
             image_location = ("assets/images/default.png")
 
@@ -677,10 +677,10 @@ class MusicPlayerUI(QWidget):
 
         return scaled, image_location
 # ------------------------------------------- Download Song Thumbnails -------------------------------------------------
-    def download_album_art_thread(self, song_title, song_artist, image_location):
+    def download_album_art_thread(self, song_title, song_artist, song_album, image_location):
         try:
             api = MusicBrainzAPI()
-            response = api.search_releases(f'release:{song_title} 'f'AND artist:{song_artist}')
+            response = api.search_releases(song_title, song_artist, song_album)
             if not response:
                 return
             images = response.get("images")
@@ -692,12 +692,11 @@ class MusicPlayerUI(QWidget):
             img_data = requests.get(album_art_url, timeout=3).content
             with open(image_location, "wb") as handler:
                 handler.write(img_data)
+                self.playlist[self.current_song_idx]['song_art'] = image_location
+                self.set_album_art(image_location)
 
         except Exception as e:
-
-            print(
-                f"Online Album Art Error: {e}"
-            )
+            print(f"Online Album Art Error: {e}")
 # ------------------------------------------------- Set Album Art ------------------------------------------------------
     def set_album_art(self, image_path):
         pixmap = QPixmap(image_path)
